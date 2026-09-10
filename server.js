@@ -3,10 +3,31 @@ import express from 'express';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import { randomUUID } from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+const supabase = (SUPABASE_URL && SUPABASE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+  : null;
+
+async function broadcastChange(event, payload) {
+  if (!supabase) return;
+  try {
+    await supabase.channel('aiven-sync').send({
+      type: 'broadcast',
+      event: event || 'mysql-changed',
+      payload,
+    });
+  } catch (err) {
+    console.error('[Supabase Broadcast Error]', err);
+  }
+}
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -102,6 +123,7 @@ app.post('/api/users/register', async (req, res) => {
         first_name ? `${first_name}${last_name ? ' ' + last_name : ''}` : tg_id]
     );
     res.json({ success: true });
+    broadcastChange('mysql-changed', { type: 'user-registered', tg_id });
   } catch (err) {
     console.error('[POST /api/users/register]', err);
     res.status(500).json({ error: 'Database error' });
@@ -154,6 +176,7 @@ app.post('/api/todos', async (req, res) => {
     );
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
+    broadcastChange('mysql-changed', { type: 'todo-created', tg_id, todo: rows[0] });
   } catch (err) {
     console.error('[POST /api/todos]', err);
     res.status(500).json({ error: 'Database error' });
@@ -179,6 +202,7 @@ app.put('/api/todos/:id', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Todo not found' });
     res.json(rows[0]);
+    broadcastChange('mysql-changed', { type: 'todo-updated', id, todo: rows[0] });
   } catch (err) {
     console.error('[PUT /api/todos/:id]', err);
     res.status(500).json({ error: 'Database error' });
@@ -192,6 +216,7 @@ app.delete('/api/todos/:id', async (req, res) => {
     const [result] = await pool.query('DELETE FROM todos WHERE id = ?', [id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Todo not found' });
     res.json({ success: true });
+    broadcastChange('mysql-changed', { type: 'todo-deleted', id });
   } catch (err) {
     console.error('[DELETE /api/todos/:id]', err);
     res.status(500).json({ error: 'Database error' });
