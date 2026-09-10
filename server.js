@@ -40,7 +40,7 @@ function requireAdmin(req, res, next) {
 app.get('/api/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', db: 'connected' });
+    res.json({ status: 'okk', db: 'connected' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: String(err) });
   }
@@ -63,7 +63,7 @@ app.post('/api/users/register', async (req, res) => {
          username     = VALUES(username),
          updated_at   = CURRENT_TIMESTAMP`,
       [tg_id, first_name || null, last_name || null, username || null,
-       first_name ? `${first_name}${last_name ? ' ' + last_name : ''}` : tg_id]
+        first_name ? `${first_name}${last_name ? ' ' + last_name : ''}` : tg_id]
     );
     res.json({ success: true });
   } catch (err) {
@@ -118,7 +118,7 @@ app.put('/api/todos/:id', async (req, res) => {
   const values = [];
 
   if (is_done !== undefined) { updates.push('is_done = ?'); values.push(is_done ? 1 : 0); }
-  if (title !== undefined)   { updates.push('title = ?');   values.push(title.trim()); }
+  if (title !== undefined) { updates.push('title = ?'); values.push(title.trim()); }
 
   if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
   values.push(id);
@@ -174,7 +174,7 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   try {
     const [[{ total_users }]] = await pool.query('SELECT COUNT(*) as total_users FROM users');
     const [[{ total_todos }]] = await pool.query('SELECT COUNT(*) as total_todos FROM todos');
-    const [[{ done_todos }]]  = await pool.query('SELECT COUNT(*) as done_todos FROM todos WHERE is_done = 1');
+    const [[{ done_todos }]] = await pool.query('SELECT COUNT(*) as done_todos FROM todos WHERE is_done = 1');
 
     // Active today = users who have a todo updated today
     const [[{ active_today }]] = await pool.query(
@@ -316,7 +316,7 @@ app.patch('/api/admin/todos/:id', requireAdmin, async (req, res) => {
   const values = [];
 
   if (is_done !== undefined) { updates.push('is_done = ?'); values.push(is_done ? 1 : 0); }
-  if (title !== undefined)   { updates.push('title = ?');   values.push(title.trim()); }
+  if (title !== undefined) { updates.push('title = ?'); values.push(title.trim()); }
 
   if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
   values.push(id);
