@@ -108,12 +108,26 @@ app.post('/api/users/register', async (req, res) => {
   }
 });
 
+async function ensureUser(tgId) {
+  if (!tgId) return;
+  try {
+    await pool.query(
+      `INSERT INTO users (tg_id, display_name) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP`,
+      [tgId, tgId === 'demo_user' ? 'Demo User' : tgId]
+    );
+  } catch (err) {
+    console.error('[ensureUser]', err);
+  }
+}
+
 // ─── GET /api/todos ──────────────────────────────────────────
 app.get('/api/todos', async (req, res) => {
   const { tg_id } = req.query;
   if (!tg_id) return res.status(400).json({ error: 'tg_id is required' });
 
   try {
+    await ensureUser(String(tg_id));
     const [rows] = await pool.query(
       'SELECT * FROM todos WHERE tg_id = ? ORDER BY is_done ASC, created_at DESC',
       [tg_id]
@@ -133,6 +147,7 @@ app.post('/api/todos', async (req, res) => {
   }
 
   try {
+    await ensureUser(String(tg_id));
     const [result] = await pool.query(
       'INSERT INTO todos (tg_id, title) VALUES (?, ?)',
       [tg_id, title.trim()]
