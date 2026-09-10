@@ -40,7 +40,7 @@ function requireAdmin(req, res, next) {
 app.get('/api/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'okk', db: 'connected' });
+    res.json({ status: 'okkk', db: 'connected' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: String(err) });
   }

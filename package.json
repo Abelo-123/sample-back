@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "deploy:api": "git add . && git commit -m \"deploy backend\" && git push back master && curl.exe -X POST https://api.render.com/deploy/srv-dahah99t0dsc73f984fg?key=x8ItRqySi-A"
+    "deploy:api": "git add . && git commit -m \"deploy backend\" && git push back master  && curl.exe -X POST https://api.render.com/deploy/srv-dahah99t0dsc73f984fg?key=x8ItRqySi-A"
   },
   "dependencies": {
     "cors": "^2.8.5",
