@@ -27,6 +27,42 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
+// ─── Auto DB Initialization ─────────────────────────────────
+async function initTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        tg_id varchar(255) NOT NULL,
+        display_name varchar(255) DEFAULT NULL,
+        first_name varchar(255) DEFAULT NULL,
+        last_name varchar(255) DEFAULT NULL,
+        username varchar(255) DEFAULT NULL,
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (tg_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS todos (
+        id int NOT NULL AUTO_INCREMENT,
+        tg_id varchar(255) NOT NULL,
+        title varchar(500) NOT NULL,
+        is_done tinyint(1) DEFAULT 0,
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_tg_id (tg_id),
+        KEY idx_is_done (is_done)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    console.log('✅ Database tables verified/initialized');
+  } catch (err) {
+    console.error('❌ Failed to initialize database tables:', err);
+  }
+}
+initTables();
+
 // ─── Auth Middleware ─────────────────────────────────────────
 function requireAdmin(req, res, next) {
   const token = req.headers['x-admin-token'];
