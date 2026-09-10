@@ -1,0 +1,10 @@
+# Backend Environment Variables & Secrets
+.env
+.env.local
+*.env
+
+# Dependencies (if installed inside api/)
+node_modules/
+
+# Logs
+*.log
