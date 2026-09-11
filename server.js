@@ -29,14 +29,31 @@ const supabase = (SUPABASE_URL && SUPABASE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 
-async function broadcastChange(event, payload) {
-  if (!supabase) return;
+let realtimeChannel = null;
+if (supabase) {
+  realtimeChannel = supabase.channel('aiven-sync');
+  realtimeChannel.subscribe((status) => {
+    console.log(`[Supabase Realtime Channel Status]`, status);
+  });
+}
+
+async function broadcastChange(action, tg_id = null, todo_id = null, data = null) {
+  if (!realtimeChannel) return;
+  const payload = {
+    action,
+    tg_id: tg_id ? String(tg_id) : null,
+    todo_id: todo_id ? Number(todo_id) : null,
+    data: data || null,
+    timestamp: new Date().toISOString(),
+  };
+
   try {
-    await supabase.channel('aiven-sync').send({
+    await realtimeChannel.send({
       type: 'broadcast',
-      event: event || 'mysql-changed',
+      event: 'mysql-changed',
       payload,
     });
+    console.log(`📡 [Realtime Broadcast] Sent ${action} for tg_id=${tg_id || 'all'}`);
   } catch (err) {
     console.error('[Supabase Broadcast Error]', err);
   }
@@ -117,8 +134,6 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // ─── User Self-Register (called by Mini App on open) ─────────
-// POST /api/users/register
-// Body: { tg_id, first_name, last_name, username }
 app.post('/api/users/register', async (req, res) => {
   const { tg_id, first_name, last_name, username } = req.body;
   if (!tg_id) return res.status(400).json({ error: 'tg_id is required' });
@@ -136,7 +151,7 @@ app.post('/api/users/register', async (req, res) => {
         first_name ? `${first_name}${last_name ? ' ' + last_name : ''}` : tg_id]
     );
     res.json({ success: true });
-    broadcastChange('mysql-changed', { type: 'user-registered', tg_id });
+    broadcastChange('USER_REGISTERED', tg_id, null, { tg_id, first_name, last_name, username });
   } catch (err) {
     console.error('[POST /api/users/register]', err);
     res.status(500).json({ error: 'Database error' });
@@ -189,7 +204,7 @@ app.post('/api/todos', async (req, res) => {
     );
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
-    broadcastChange('mysql-changed', { type: 'todo-created', tg_id, todo: rows[0] });
+    broadcastChange('TODO_CREATED', tg_id, rows[0].id, rows[0]);
   } catch (err) {
     console.error('[POST /api/todos]', err);
     res.status(500).json({ error: 'Database error' });
@@ -215,7 +230,7 @@ app.put('/api/todos/:id', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Todo not found' });
     res.json(rows[0]);
-    broadcastChange('mysql-changed', { type: 'todo-updated', id, todo: rows[0] });
+    broadcastChange('TODO_UPDATED', rows[0].tg_id, rows[0].id, rows[0]);
   } catch (err) {
     console.error('[PUT /api/todos/:id]', err);
     res.status(500).json({ error: 'Database error' });
@@ -226,10 +241,12 @@ app.put('/api/todos/:id', async (req, res) => {
 app.delete('/api/todos/:id', async (req, res) => {
   const { id } = req.params;
   try {
+    const [[existing]] = await pool.query('SELECT tg_id FROM todos WHERE id = ?', [id]);
+    const targetTgId = existing?.tg_id || null;
     const [result] = await pool.query('DELETE FROM todos WHERE id = ?', [id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Todo not found' });
     res.json({ success: true });
-    broadcastChange('mysql-changed', { type: 'todo-deleted', id });
+    broadcastChange('TODO_DELETED', targetTgId, Number(id), { id: Number(id), tg_id: targetTgId });
   } catch (err) {
     console.error('[DELETE /api/todos/:id]', err);
     res.status(500).json({ error: 'Database error' });
@@ -265,7 +282,6 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
     const [[{ total_todos }]] = await pool.query('SELECT COUNT(*) as total_todos FROM todos');
     const [[{ done_todos }]] = await pool.query('SELECT COUNT(*) as done_todos FROM todos WHERE is_done = 1');
 
-    // Active today = users who have a todo updated today
     const [[{ active_today }]] = await pool.query(
       `SELECT COUNT(DISTINCT tg_id) as active_today FROM todos
        WHERE DATE(updated_at) = CURDATE()`
@@ -282,7 +298,7 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   }
 });
 
-// GET /api/admin/users  — all users with todo stats
+// GET /api/admin/users
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
   const { search } = req.query;
   try {
@@ -311,7 +327,6 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
 
     const [rows] = await pool.query(sql, params);
 
-    // compute completion % per user
     const users = rows.map(u => ({
       ...u,
       todo_count: Number(u.todo_count),
@@ -328,7 +343,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /api/admin/users/:tg_id  — update display_name
+// PATCH /api/admin/users/:tg_id
 app.patch('/api/admin/users/:tg_id', requireAdmin, async (req, res) => {
   const { tg_id } = req.params;
   const { display_name } = req.body;
@@ -342,13 +357,14 @@ app.patch('/api/admin/users/:tg_id', requireAdmin, async (req, res) => {
     const [[user]] = await pool.query('SELECT * FROM users WHERE tg_id = ?', [tg_id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
+    broadcastChange('USER_UPDATED', tg_id, null, user);
   } catch (err) {
     console.error('[PATCH /api/admin/users/:tg_id]', err);
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-// DELETE /api/admin/users/:tg_id  — delete user + all their todos
+// DELETE /api/admin/users/:tg_id
 app.delete('/api/admin/users/:tg_id', requireAdmin, async (req, res) => {
   const { tg_id } = req.params;
   try {
@@ -356,13 +372,14 @@ app.delete('/api/admin/users/:tg_id', requireAdmin, async (req, res) => {
     const [result] = await pool.query('DELETE FROM users WHERE tg_id = ?', [tg_id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'User not found' });
     res.json({ success: true });
+    broadcastChange('USER_DELETED', tg_id, null, { tg_id });
   } catch (err) {
     console.error('[DELETE /api/admin/users/:tg_id]', err);
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-// GET /api/admin/users/:tg_id/todos  — all todos for a user
+// GET /api/admin/users/:tg_id/todos
 app.get('/api/admin/users/:tg_id/todos', requireAdmin, async (req, res) => {
   const { tg_id } = req.params;
   try {
@@ -377,7 +394,7 @@ app.get('/api/admin/users/:tg_id/todos', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/admin/users/:tg_id/todos  — add todo for user
+// POST /api/admin/users/:tg_id/todos
 app.post('/api/admin/users/:tg_id/todos', requireAdmin, async (req, res) => {
   const { tg_id } = req.params;
   const { title } = req.body;
@@ -390,13 +407,14 @@ app.post('/api/admin/users/:tg_id/todos', requireAdmin, async (req, res) => {
     );
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
+    broadcastChange('TODO_CREATED', tg_id, rows[0].id, rows[0]);
   } catch (err) {
     console.error('[POST /api/admin/users/:tg_id/todos]', err);
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-// PATCH /api/admin/todos/:id  — update a todo (title / is_done)
+// PATCH /api/admin/todos/:id
 app.patch('/api/admin/todos/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { title, is_done } = req.body;
@@ -415,6 +433,7 @@ app.patch('/api/admin/todos/:id', requireAdmin, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM todos WHERE id = ?', [id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Todo not found' });
     res.json(rows[0]);
+    broadcastChange('TODO_UPDATED', rows[0].tg_id, rows[0].id, rows[0]);
   } catch (err) {
     console.error('[PATCH /api/admin/todos/:id]', err);
     res.status(500).json({ error: 'Database error' });
@@ -425,9 +444,12 @@ app.patch('/api/admin/todos/:id', requireAdmin, async (req, res) => {
 app.delete('/api/admin/todos/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
+    const [[existing]] = await pool.query('SELECT tg_id FROM todos WHERE id = ?', [id]);
+    const targetTgId = existing?.tg_id || null;
     const [result] = await pool.query('DELETE FROM todos WHERE id = ?', [id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Todo not found' });
     res.json({ success: true });
+    broadcastChange('TODO_DELETED', targetTgId, Number(id), { id: Number(id), tg_id: targetTgId });
   } catch (err) {
     console.error('[DELETE /api/admin/todos/:id]', err);
     res.status(500).json({ error: 'Database error' });
