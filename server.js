@@ -22,6 +22,14 @@ app.get('/admin/*', (req, res) => {
   res.sendFile(path.join(adminPublicPath, 'index.html'));
 });
 
+// Serve Client MiniApp statically at /
+const clientPublicPath = path.join(__dirname, 'public_client');
+app.use(express.static(clientPublicPath));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/admin')) return next();
+  res.sendFile(path.join(clientPublicPath, 'index.html'));
+});
+
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
